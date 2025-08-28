@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>360度 全方位シューティング</title>
+<style>
+  :root{
+    --bg-1:#070a12;
+    --bg-2:#0b1222;
+    --acc-1:#34d2ff;
+    --acc-2:#7cffb7;
+    --acc-3:#ff7ad9;
+    --glass: rgba(255,255,255,.06);
+    --glass-bd: rgba(255,255,255,.16);
+    --shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 0 40px rgba(255,255,255,.03);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+    color: #dfe7ff;
+    background: radial-gradient(1200px 800px at 70% 20%, #0f1a33 0%, #0b1222 40%, #070a12 100%);
+    overflow: hidden;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Noto Sans JP", "Hiragino Kaku Gothic ProN", Meiryo, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  /* 背景・パララックス格子 */
+  .bg-grid, .bg-stars {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .bg-grid::before, .bg-grid::after{
+    content: "";
+    position: absolute;
+    inset: -10%;
+    background:
+      radial-gradient(60vmax 60vmax at 50% 50%, rgba(52,210,255,.08), transparent 60%),
+      repeating-linear-gradient( transparent 0 22px, rgba(255,255,255,.04) 22px 23px),
+      repeating-linear-gradient(90deg, transparent 0 22px, rgba(255,255,255,.04) 22px 23px);
+    filter: blur(0.3px) saturate(105%);
+    transform: perspective(800px) rotateX(65deg) translateY(25%) scale(1.2);
+    transform-origin: 50% 100%;
+    animation: drift 18s linear infinite;
+    opacity: .35;
+  }
+  .bg-grid::after{
+    animation-direction: reverse;
+    opacity: .18;
+  }
+  @keyframes drift {
+    0% { transform: perspective(800px) rotateX(65deg) translateY(25%) scale(1.2) rotate(0deg);}
+    100% { transform: perspective(800px) rotateX(65deg) translateY(25%) scale(1.2) rotate(360deg);}
+  }
+
+  .bg-stars::before {
+    content:"";
+    position:absolute; inset:-50%;
+    background:
+      radial-gradient(1px 1px at 10% 20%, rgba(255,255,255,.7) 50%, transparent 60%),
+      radial-gradient(1px 1px at 30% 80%, rgba(255,255,255,.6) 50%, transparent 60%),
+      radial-gradient(1px 1px at 80% 30%, rgba(255,255,255,.8) 50%, transparent 60%),
+      radial-gradient(1px 1px at 60% 60%, rgba(255,255,255,.5) 50%, transparent 60%),
+      radial-gradient(1px 1px at 90% 10%, rgba(255,255,255,.7) 50%, transparent 60%);
+    opacity:.35;
+    animation: twinkle 20s linear infinite;
+  }
+  @keyframes twinkle {
+    from { transform: translate3d(0,0,0) }
+    to { transform: translate3d(10%, -10%, 0) }
+  }
+
+  canvas#game {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: none; /* 独自クロスヘアを描画 */
+    z-index: 1;
+  }
+
+  /* 右上スコア（グラスモーフィズム） */
+  .hud {
+    position: fixed;
+    right: max(16px, env(safe-area-inset-right));
+    top: max(16px, env(safe-area-inset-top));
+    z-index: 3;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: var(--glass);
+    border: 1px solid var(--glass-bd);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(8px) saturate(140%);
+    -webkit-backdrop-filter: blur(8px) saturate(140%);
+    user-select: none;
+  }
+  .hud .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, #fff 0 20%, #7cffb7 60%, #00b894 100%);
+    box-shadow: 0 0 10px #7cffb7, 0 0 22px #34ffa7aa;
+  }
+  .hud .label {
+    font-size: 12px; letter-spacing: .08em; opacity: .8;
+  }
+  .hud .score {
+    font-weight: 800;
+    font-size: 18px;
+    text-shadow: 0 2px 8px rgba(0,0,0,.35);
+  }
+
+  /* 中央オーバーレイ */
+  #overlay {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    z-index: 4;
+    background: radial-gradient(60vmax 60vmax at 50% 50%, rgba(0,0,0,.35), rgba(0,0,0,.65));
+    transition: opacity .3s ease, visibility .3s ease;
+  }
+  #overlay.hidden { opacity: 0; visibility: hidden; }
+  #overlay .panel {
+    width: min(90vw, 560px);
+    padding: 28px 24px 22px;
+    border-radius: 16px;
+    background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.03));
+    border: 1px solid rgba(255,255,255,.2);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(10px) saturate(140%);
+    -webkit-backdrop-filter: blur(10px) saturate(140%);
+    text-align: center;
+  }
+  .panel h1 {
+    margin: 0 0 10px;
+    font-size: clamp(28px, 6vw, 44px);
+    letter-spacing: .08em;
+    background: linear-gradient(90deg, var(--acc-1), var(--acc-2), var(--acc-3));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: 0 0 30px rgba(52,210,255,.35);
+  }
+  .panel .final {
+    margin: 6px 0 14px;
+    font-size: clamp(16px, 3.5vw, 20px);
+    opacity: .9;
+  }
+  .panel .tips {
+    margin: 10px 0 0;
+    font-size: 12px;
+    opacity: .7;
+    letter-spacing: .04em;
+  }
+  .panel .row {
+    display: flex; gap:10px; justify-content: center; align-items: center;
+  }
+  .panel .btn {
+    margin-top: 6px;
+    appearance: none;
+    border: 0;
+    border-radius: 12px;
+    padding: 12px 18px;
+    font-weight: 800;
+    letter-spacing: .06em;
+    color: #0a1426;
+    background: linear-gradient(180deg, #7cffb7, #34ffa7);
+    box-shadow: 0 10px 24px rgba(52,255,167,.25), inset 0 -2px 0 rgba(0,0,0,.15);
+    cursor: pointer;
+    transition: transform .06s ease, filter .2s ease;
+  }
+  .panel .btn:hover { filter: saturate(120%) brightness(1.05); }
+  .panel .btn:active { transform: translateY(1px) scale(.99); }
+
+  /* 安全地帯の説明ピル */
+  .help-pill {
+    position: fixed; left: max(16px, env(safe-area-inset-left)); bottom: max(16px, env(safe-area-inset-bottom));
+    z-index: 2;
+    padding: 8px 12px;
+    font-size: 12px;
+    border-radius: 999px;
+    color: #cfe7ff;
+    background: var(--glass);
+    border: 1px solid var(--glass-bd);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(6px) saturate(140%);
+    -webkit-backdrop-filter: blur(6px) saturate(140%);
+    user-select: none;
+  }
+  .kbd {
+    display: inline-grid; place-items:center;
+    padding: 0 6px; min-width: 22px; height: 22px; border-radius: 6px;
+    border: 1px solid rgba(255,255,255,.25);
+    background: rgba(255,255,255,.08);
+    margin: 0 2px;
+    font-weight: 700; font-size: 11px;
+  }
+
+  @media (max-width: 640px){
+    .help-pill { display: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="bg-grid"></div>
+  <div class="bg-stars"></div>
+
+  <canvas id="game" aria-label="360度シューティング"></canvas>
+
+  <div class="hud" aria-live="polite" aria-atomic="true">
+    <div class="dot" aria-hidden="true"></div>
+    <div class="label">倒した数</div>
+    <div class="score" id="score">0</div>
+  </div>
+
+  <div class="help-pill">
+    マウスで狙い <span class="kbd">Click</span> / 長押し、スマホはタップで射撃
+  </div>
+
+  <div id="overlay" class="hidden" role="dialog" aria-modal="true">
+    <div class="panel">
+      <h1 id="ov-title">GAME OVER</h1>
+      <div class="final">倒した数 <strong id="finalScore">0</strong></div>
+      <div class="row">
+        <button class="btn" id="restartBtn">もう一度あそぶ</button>
+      </div>
+      <div class="tips">ヒント: 敵を3機倒すごとに敵のスピードが上がります。スペースまたはクリックでも再開できます。</div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // キャンバス基本セットアップ（高DPI対応）
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  let DPR = Math.min(window.devicePixelRatio || 1, 2);
+  let W = 0, H = 0, CX = 0, CY = 0;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = canvas.clientWidth;
+    H = canvas.clientHeight;
+    canvas.width  = Math.round(W * DPR);
+    canvas.height = Math.round(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    CX = W / 2;
+    CY = H / 2;
+  }
+  addEventListener('resize', resize, { passive: true });
+  resize();
+
+  // ゲーム状態
+  const state = {
+    running: true,
+    over: false,
+    score: 0,
+    killsForSpeedUp: 3,
+    baseEnemySpeed: 42,     // とても遅いスタート
+    speedStep: 0.18,        // 3機ごとに+18% ずつ
+    lastTime: 0,
+  };
+
+  // プレイヤー（中心固定）
+  const player = {
+    x: () => CX,
+    y: () => CY,
+    r: 14,
+    pulse: 0,
+  };
+
+  // 入力（ポインタ）
+  const pointer = {
+    x: CX, y: CY,
+    down: false,
+    visible: true,
+    angle() { return Math.atan2(this.y - CY, this.x - CX); }
+  };
+  canvas.addEventListener('pointermove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    pointer.x = e.clientX - rect.left;
+    pointer.y = e.clientY - rect.top;
+  }, { passive: true });
+
+  // 射撃
+  let isHolding = false;
+  let fireCooldown = 0;
+  const FIRE_RATE = 9.5; // 発/秒
+  const FIRE_INTERVAL = 1 / FIRE_RATE;
+  canvas.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    ensureAudio();
+    isHolding = true;
+    pointer.down = true;
+    shoot(); // すぐ1発
+  }, { passive: false });
+  addEventListener('pointerup', () => { isHolding = false; pointer.down = false; }, { passive: true });
+  addEventListener('blur', () => { isHolding = false; pointer.down = false; }, { passive: true });
+
+  // キーボード（再開）
+  addEventListener('keydown', (e) => {
+    if (e.code === 'Space') {
+      e.preventDefault();
+      if (state.over) restart();
+      else { ensureAudio(); isHolding = true; }
+    }
+  });
+  addEventListener('keyup', (e) => { if (e.code === 'Space') isHolding = false; });
+
+  // エンティティ
+  const bullets = [];
+  const enemies = [];
+  const particles = [];
+
+  // 音（WebAudio｜ファイル不要の軽量シンセ）
+  let audioCtx = null;
+  function ensureAudio(){
+    if (!audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function env(duration=0.15, gain=0.08){ // 簡易エンベロープ
+    if (!audioCtx) return null;
+    const g = audioCtx.createGain();
+    g.gain.value = 0;
+    g.connect(audioCtx.destination);
+    const t = audioCtx.currentTime;
+    g.gain.linearRampToValueAtTime(gain, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    return { g, t };
+  }
+  function playShot(){
+    if (!audioCtx) return;
+    const { g, t } = env(0.12, 0.06) || {};
+    if (!g) return;
+    const o = audioCtx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(520, t);
+    o.frequency.exponentialRampToValueAtTime(880, t + 0.05);
+    o.connect(g); o.start(t); o.stop(t + 0.12);
+  }
+  function playExplosion(){
+    if (!audioCtx) return;
+    const { g, t } = env(0.35, 0.14) || {};
+    if (!g) return;
+    // ノイズ → 爆発風
+    const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.35, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = (Math.random()*2-1) * (1 - i / data.length);
+    const s = audioCtx.createBufferSource();
+    const bp = audioCtx.createBiquadFilter(); bp.type = 'lowpass'; bp.frequency.setValueAtTime(1800, t);
+    s.buffer = buffer; s.connect(bp); bp.connect(g);
+    s.start(t); s.stop(t + 0.35);
+  }
+
+  // ユーティリティ
+  const rand = (a,b) => Math.random()*(b-a)+a;
+  const clamp = (v,min,max) => Math.max(min, Math.min(max, v));
+
+  // 弾生成
+  function shoot(){
+    if (state.over) return;
+    const a = pointer.angle();
+    const speed = 900;
+    const r = player.r + 2;
+    bullets.push({
+      x: CX + Math.cos(a) * r,
+      y: CY + Math.sin(a) * r,
+      vx: Math.cos(a) * speed,
+      vy: Math.sin(a) * speed,
+      life: 1.1, // フェードアウト用
+      r: 3.2,
+      hue: rand(160, 220)
+    });
+    muzzleFlash(a);
+    playShot();
+  }
+
+  // マズルフラッシュ（ちょっとした演出）
+  function muzzleFlash(a){
+    const count = 10;
+    for (let i = 0; i < count; i++){
+      const sp = rand(120, 240);
+      particles.push({
+        x: CX + Math.cos(a) * (player.r+2),
+        y: CY + Math.sin(a) * (player.r+2),
+        vx: Math.cos(a + rand(-0.25, 0.25)) * sp,
+        vy: Math.sin(a + rand(-0.25, 0.25)) * sp,
+        life: rand(0.08, .16),
+        r: rand(1, 2.2),
+        color: `hsla(${rand(150,210)}, 90%, 65%, 1)`,
+        fade: rand(2.5, 4.5)
+      });
+    }
+  }
+
+  // 敵生成（外周から中心へ）
+  let spawnTimer = 0;
+  let spawnInterval = 0.9;
+  function spawnEnemy() {
+    const angle = rand(0, Math.PI*2);
+    const margin = 60;
+    const radius = Math.max(W, H) * 0.55 + margin;
+    const ex = CX + Math.cos(angle) * radius;
+    const ey = CY + Math.sin(angle) * radius;
+
+    // スピード計算：3機ごとに+step%
+    const level = Math.floor(state.score / state.killsForSpeedUp);
+    const speed = state.baseEnemySpeed * (1 + level * state.speedStep);
+
+    // 中心への正規化ベクトル
+    const dx = CX - ex, dy = CY - ey;
+    const len = Math.hypot(dx, dy) || 1;
+    const vx = (dx / len) * speed;
+    const vy = (dy / len) * speed;
+
+    // 敵の見た目サイズを少し揺らす
+    const er = rand(11, 16);
+    enemies.push({
+      x: ex, y: ey, vx, vy, r: er,
+      hue: rand(330, 360), // ピンク〜赤寄り
+      hit: false
+    });
+  }
+
+  // パーティクル爆発
+  function explode(x, y, baseHue=0){
+    playExplosion();
+    const n = 28;
+    for (let i=0;i<n;i++){
+      const a = rand(0, Math.PI*2);
+      const sp = rand(60, 260);
+      particles.push({
+        x, y,
+        vx: Math.cos(a)*sp,
+        vy: Math.sin(a)*sp,
+        life: rand(0.4, 0.9),
+        r: rand(1.2, 2.8),
+        color: `hsla(${baseHue + rand(-10, 10)}, 90%, ${rand(55, 70)}%, 1)`,
+        fade: rand(1.4, 2.4)
+      });
+    }
+  }
+
+  // スコア更新
+  const scoreEl = document.getElementById('score');
+  function addScore(n=1){
+    state.score += n;
+    scoreEl.textContent = state.score;
+  }
+
+  // ゲームオーバー演出
+  const overlay = document.getElementById('overlay');
+  const finalScoreEl = document.getElementById('finalScore');
+  const restartBtn = document.getElementById('restartBtn');
+  restartBtn.addEventListener('click', () => restart());
+
+  function gameOver(){
+    if (state.over) return;
+    state.over = true;
+    overlay.classList.remove('hidden');
+    finalScoreEl.textContent = state.score;
+  }
+
+  function restart(){
+    // 初期化
+    bullets.length = 0;
+    enemies.length = 0;
+    particles.length = 0;
+    state.score = 0;
+    scoreEl.textContent = '0';
+    spawnTimer = 0;
+    state.over = false;
+    overlay.classList.add('hidden');
+  }
+
+  // ループ
+  function loop(t){
+    if (!state.lastTime) state.lastTime = t;
+    const dt = Math.min((t - state.lastTime) / 1000, 0.033); // 秒
+    state.lastTime = t;
+
+    update(dt);
+    render(dt);
+
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // 更新
+  function update(dt){
+    // 射撃レート
+    if (!state.over && isHolding){
+      fireCooldown -= dt;
+      if (fireCooldown <= 0){
+        shoot();
+        fireCooldown = FIRE_INTERVAL;
+      }
+    }
+
+    // 敵スポーン
+    if (!state.over){
+      spawnTimer -= dt;
+      if (spawnTimer <= 0){
+        spawnEnemy();
+        spawnTimer = rand(spawnInterval * .85, spawnInterval * 1.15);
+      }
+    }
+
+    // 弾
+    for (let i = bullets.length-1; i>=0; i--){
+      const b = bullets[i];
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.life -= dt * 0.9;
+      if (b.x < -40 || b.x > W+40 || b.y < -40 || b.y > H+40 || b.life<=0){
+        bullets.splice(i,1);
+      }
+    }
+
+    // 敵
+    for (let i = enemies.length-1; i>=0; i--){
+      const e = enemies[i];
+      e.x += e.vx * dt;
+      e.y += e.vy * dt;
+
+      // プレイヤー衝突→ゲームオーバー
+      const dxp = e.x - CX, dyp = e.y - CY;
+      const d2p = dxp*dxp + dyp*dyp;
+      const rr = (e.r + player.r) * (e.r + player.r);
+      if (d2p <= rr){
+        explode(CX, CY, 200);
+        gameOver();
+        break;
+      }
+    }
+
+    // 衝突判定（弾×敵）
+    for (let i = enemies.length-1; i>=0; i--){
+      const e = enemies[i];
+      for (let j = bullets.length-1; j>=0; j--){
+        const b = bullets[j];
+        const dx = e.x - b.x, dy = e.y - b.y;
+        if (dx*dx + dy*dy <= (e.r + b.r) * (e.r + b.r)){
+          // 撃破
+          explode(e.x, e.y, e.hue);
+          enemies.splice(i,1);
+          bullets.splice(j,1);
+          addScore(1);
+          break;
+        }
+      }
+    }
+
+    // パーティクル
+    for (let i=particles.length-1; i>=0; i--){
+      const p = particles[i];
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= 0.985; p.vy *= 0.985;
+      p.life -= dt * p.fade;
+      if (p.life <= 0) particles.splice(i,1);
+    }
+
+    // 中央の鼓動
+    player.pulse += dt * 2.6;
+  }
+
+  // 描画
+  function render(dt){
+    // 背景 ほんのり残像
+    ctx.fillStyle = 'rgba(5,8,14,0.35)';
+    ctx.fillRect(0,0,W,H);
+
+    // ガイドリング
+    ctx.save();
+    ctx.translate(CX, CY);
+    const ringR = Math.min(W, H) * 0.22;
+    ctx.globalAlpha = 0.14;
+    ctx.strokeStyle = '#9ad7ff';
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([6, 8]);
+    ctx.beginPath();
+    ctx.arc(0, 0, ringR, 0, Math.PI*2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // 弾（グロー）
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const b of bullets){
+      const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, 18);
+      grad.addColorStop(0, `hsla(${b.hue},100%,75%,${clamp(b.life,0,1)})`);
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, 18, 0, Math.PI*2);
+      ctx.fill();
+
+      ctx.fillStyle = `hsla(${b.hue},100%,80%,.95)`;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // 敵（ネオングロー）
+    ctx.save();
+    for (const e of enemies){
+      const g = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, e.r*2.2);
+      g.addColorStop(0, `hsla(${e.hue}, 90%, 65%, .9)`);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.r*2.2, 0, Math.PI*2);
+      ctx.fill();
+
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = `hsla(${e.hue}, 100%, 70%, .9)`;
+      ctx.fillStyle = `rgba(10,12,18,.9)`;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.r, 0, Math.PI*2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // パーティクル
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const p of particles){
+      ctx.globalAlpha = clamp(p.life, 0, 1);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // プレイヤー（中心固定タレット）
+    ctx.save();
+    const px = CX, py = CY;
+    const pulseR = player.r + Math.sin(player.pulse)*1.2;
+    // 外周グロー
+    const gg = ctx.createRadialGradient(px, py, 0, px, py, 38);
+    gg.addColorStop(0, 'rgba(80,200,255,.55)');
+    gg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gg;
+    ctx.beginPath(); ctx.arc(px, py, 38, 0, Math.PI*2); ctx.fill();
+
+    // 本体
+    const bodyGrad = ctx.createRadialGradient(px-3, py-3, 0, px, py, pulseR+10);
+    bodyGrad.addColorStop(0, '#e6f6ff');
+    bodyGrad.addColorStop(1, '#7fd6ff');
+    ctx.fillStyle = bodyGrad;
+    ctx.strokeStyle = 'rgba(255,255,255,.85)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(px, py, pulseR, 0, Math.PI*2);
+    ctx.fill(); ctx.stroke();
+
+    // 照準ライン
+    const a = pointer.angle();
+    ctx.strokeStyle = 'rgba(130,220,255,.85)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(px + Math.cos(a)* (player.r+1), py + Math.sin(a)*(player.r+1));
+    ctx.lineTo(px + Math.cos(a)* 46, py + Math.sin(a)* 46);
+    ctx.stroke();
+    ctx.restore();
+
+    // カスタムクロスヘア
+    if (pointer.visible){
+      ctx.save();
+      ctx.translate(pointer.x, pointer.y);
+      ctx.globalAlpha = 0.9;
+      ctx.strokeStyle = 'rgba(160,220,255,.9)';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(0, 0, 10, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-16, 0); ctx.lineTo(-6, 0);
+      ctx.moveTo(16, 0);  ctx.lineTo(6, 0);
+      ctx.moveTo(0, -16); ctx.lineTo(0, -6);
+      ctx.moveTo(0, 16);  ctx.lineTo(0, 6);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // 再開ショートカット（オーバーレイ表示中はクリックで再開）
+  overlay.addEventListener('click', (e)=> {
+    if (state.over) restart();
+  });
+
+})();
+</script>
+</body>
+</html>
