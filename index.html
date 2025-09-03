@@ -3,11 +3,12 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>360度 全方位シューティング（機能追加版）</title>
+<title>360度 全方位シューティング（機能追加版／マシン3対応）</title>
 <style>
   /* =====================================================
      外観スタイル（元コード＋一部UI追加）
      - 背景、HUD、オーバーレイ、メニュー等
+     - 見た目のみ。ゲームロジックには影響しない
      ===================================================== */
   :root{
     --bg-1:#070a12;
@@ -29,7 +30,7 @@
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Noto Sans JP", "Hiragino Kaku Gothic ProN", Meiryo, "Helvetica Neue", Arial, sans-serif;
   }
 
-  /* 背景・パララックス格子 */
+  /* 背景・パララックス格子（演出用。キャンバスとは別） */
   .bg-grid, .bg-stars {
     position: fixed;
     inset: 0;
@@ -76,17 +77,18 @@
     to { transform: translate3d(10%, -10%, 0) }
   }
 
+  /* プレイ画面のキャンバス（ゲーム描画の主役） */
   canvas#game {
     position: fixed;
     inset: 0;
     width: 100%;
     height: 100%;
     display: block;
-    cursor: none; /* 独自クロスヘアを描画 */
+    cursor: none; /* 自前のクロスヘアを描くためデフォルトカーソルは隠す */
     z-index: 1;
   }
 
-  /* 右上スコア（グラスモーフィズム） */
+  /* 右上スコア（HUD） */
   .hud {
     position: fixed;
     right: max(16px, env(safe-area-inset-right));
@@ -108,7 +110,7 @@
   .hud .label { font-size: 12px; letter-spacing: .08em; opacity: .8; }
   .hud .score { font-weight: 800; font-size: 18px; text-shadow: 0 2px 8px rgba(0,0,0,.35); }
 
-  /* 左上：ハンバーガーメニュー */
+  /* 左上：ハンバーガーメニュー（ポーズ兼設定） */
   .menu-btn {
     position: fixed;
     left: max(16px, env(safe-area-inset-left));
@@ -127,7 +129,7 @@
   .menu-btn .bar{ width: 18px; height: 2px; background:#cfe7ff; border-radius: 2px; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
   .menu-btn .bar + .bar{ margin-top: 4px; }
 
-  /* 中央オーバーレイ（ゲームオーバー） */
+  /* 中央オーバーレイ（ゲームオーバー時） */
   #overlay { position: fixed; inset: 0; display: grid; place-items: center; z-index: 5; background: radial-gradient(60vmax 60vmax at 50% 50%, rgba(0,0,0,.35), rgba(0,0,0,.65)); transition: opacity .3s ease, visibility .3s ease; }
   #overlay.hidden { opacity: 0; visibility: hidden; }
   #overlay .panel {
@@ -149,12 +151,12 @@
   .panel .btn:hover { filter: saturate(120%) brightness(1.05); }
   .panel .btn:active { transform: translateY(1px) scale(.99); }
 
-  /* 左下ヒントピル */
+  /* 左下ヒントピル（操作説明） */
   .help-pill { position: fixed; left: max(16px, env(safe-area-inset-left)); bottom: max(16px, env(safe-area-inset-bottom)); z-index: 2; padding: 8px 12px; font-size: 12px; border-radius: 999px; color: #cfe7ff; background: var(--glass); border: 1px solid var(--glass-bd); box-shadow: var(--shadow); backdrop-filter: blur(6px) saturate(140%); -webkit-backdrop-filter: blur(6px) saturate(140%); user-select: none; }
   .kbd { display: inline-grid; place-items:center; padding: 0 6px; min-width: 22px; height: 22px; border-radius: 6px; border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.08); margin: 0 2px; font-weight: 700; font-size: 11px; }
   @media (max-width: 640px){ .help-pill { display: none; } }
 
-  /* ==== メニューダイアログ（スクロール可能・拡張前提） ==== */
+  /* ==== メニューダイアログ（スクロール可能。設定項目が増えても対応） ==== */
   #menuOverlay { position: fixed; inset: 0; display: grid; place-items: center; z-index: 6; background: radial-gradient(60vmax 60vmax at 50% 50%, rgba(0,0,0,.45), rgba(0,0,0,.7)); transition: opacity .25s ease, visibility .25s ease; }
   #menuOverlay.hidden { opacity: 0; visibility: hidden; }
   .menu-panel { width: min(92vw, 620px); max-height: min(80vh, 620px); overflow-y: auto; padding: 18px; border-radius: 16px; background: linear-gradient(180deg, rgba(255,255,255,.1), rgba(255,255,255,.04)); border: 1px solid rgba(255,255,255,.25); box-shadow: var(--shadow); backdrop-filter: blur(12px) saturate(140%); -webkit-backdrop-filter: blur(12px) saturate(140%); }
@@ -168,33 +170,33 @@
 </style>
 </head>
 <body>
-  <!-- 背景 -->
+  <!-- 背景（装飾レイヤ。入力不可） -->
   <div class="bg-grid"></div>
   <div class="bg-stars"></div>
 
-  <!-- ゲームキャンバス -->
+  <!-- ゲームキャンバス（すべてのゲーム描画はここに行う） -->
   <canvas id="game" aria-label="360度シューティング"></canvas>
 
-  <!-- 右上スコア表示 -->
+  <!-- 右上スコア表示（HUD） -->
   <div class="hud" aria-live="polite" aria-atomic="true">
     <div class="dot" aria-hidden="true"></div>
     <div class="label">倒した数</div>
     <div class="score" id="score">0</div>
   </div>
 
-  <!-- 左上：メニューボタン（ハンバーガー） -->
+  <!-- 左上：メニューボタン（ポーズ/設定の入口） -->
   <button id="menuBtn" class="menu-btn" aria-label="メニューを開く" title="メニューを開く">
     <div class="bar"></div>
     <div class="bar"></div>
     <div class="bar"></div>
   </button>
 
-  <!-- 左下：操作ヒント -->
+  <!-- 左下：操作ヒント（選択したマシンに応じて文言を切替） -->
   <div class="help-pill">
     <span id="helpText">マウスで狙い <span class="kbd">Click</span> / 長押し、スマホはタップで射撃</span>
   </div>
 
-  <!-- ゲームオーバーオーバーレイ -->
+  <!-- ゲームオーバー時のオーバーレイ（スコア表示と再スタート） -->
   <div id="overlay" class="hidden" role="dialog" aria-modal="true">
     <div class="panel">
       <h1 id="ov-title">GAME OVER</h1>
@@ -206,12 +208,12 @@
     </div>
   </div>
 
-  <!-- メニューオーバーレイ（一時停止中に表示。ゲーム時間は停止、BGMのみ継続） -->
+  <!-- メニューオーバーレイ（一時停止中にのみ表示。BGMは継続、SFXはミュート） -->
   <div id="menuOverlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="menuTitle">
     <div class="menu-panel">
       <div id="menuTitle" class="menu-title">メニュー</div>
 
-      <!-- マシン切り替えセクション -->
+      <!-- マシン切り替え（操作方式を2種→3種から選択） -->
       <div class="menu-section">
         <div class="menu-title">マシンの切り替え</div>
         <!-- ラジオ風のUI（現在選択を可視化） -->
@@ -229,12 +231,21 @@
             <small>左右長押しで 1秒=360° 回転（あとで調整可）</small>
           </div>
         </div>
+        <!-- BEGIN MACHINE3_HTML -->
+        <div class="menu-row" data-machine="3" id="rowMachine3">
+          <div class="menu-radio" id="radio3"><div class="dot"></div></div>
+          <div>
+            <div><strong>マシン3</strong>：自動で時計回りに回転し、常時自動連射</div>
+            <small>Space/Enterを押している間は回転と射撃が停止。離すと“溜め”に応じて最初の1発が最大3倍・弾速は最大0.5倍まで低下</small>
+          </div>
+        </div>
+        <!-- END MACHINE3_HTML -->
         <div style="display:flex; gap:10px; margin-top:10px;">
           <button class="menu-btn-lg" id="toggleMachineBtn">マシンの切り替え</button>
         </div>
       </div>
 
-      <!-- その他 -->
+      <!-- その他操作 -->
       <div class="menu-section">
         <div class="menu-title">その他</div>
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
@@ -252,15 +263,17 @@
 (async () => {
   /* =====================================================
      設定ファイル(config.json)の読み込み
-     - 失敗時はデフォルト値を使用
+     - 外部JSONで数値を上書き可能（同一オリジン想定）
+     - 失敗時は下記デフォルト値のまま（警告ログのみ）
+     - 単位メモ：速度はpx/秒、角速度はrad/秒
      ===================================================== */
   let config = {
-    killsForSpeedUp: 3,
-    baseEnemySpeed: 42,
-    speedStep: 0.18,
-    fireRate: 9.5,
-    spawnInterval: 0.9,
-    bulletSpeed: 900,
+    killsForSpeedUp: 3,     // 3撃破ごとに敵速度が段階上昇
+    baseEnemySpeed: 42,     // 敵の基礎移動速度（遅め）
+    speedStep: 0.18,        // 段階ごとの増分倍率（+18%）
+    fireRate: 9.5,          // 連射レート（発/秒）
+    spawnInterval: 0.9,     // 敵出現の平均間隔（秒）
+    bulletSpeed: 900,       // 弾速（px/秒）
     machine2TurnSpeedDegPerSec: 360 /* マシン2の回転速度（deg/s）*/
   };
   try {
@@ -268,13 +281,25 @@
     if (resp.ok) Object.assign(config, await resp.json());
   } catch (e) { console.warn("config.json の読み込みに失敗したためデフォルトを使用します", e); }
 
+  /* ===== BEGIN MACHINE3_FLAGS =====
+     既存互換維持のため既定はOFF。trueでメニューに表示され選択可能に */
+  const enableMachine3 = true; // ← 試すときは true にしてください
+  const MACHINE3_PARAMS = {
+    maxChargeSec: 3,     // チャージ最大時間（秒）
+    maxRadiusMul: 3,     // 弾半径の最大倍率（×3）
+    minSpeedMul: 0.5     // 最大チャージ時の弾速倍率（×0.5）
+  };
+  /* ===== END MACHINE3_FLAGS ===== */
+
   /* =====================================================
      キャンバス基本セットアップ（高DPI対応）
+     - CSSサイズ(W,H)に対し、実ピクセル(canvas.width/height)をDPR倍
+     - setTransform(DPR,…)で座標系をCSSピクセルに揃える
      ===================================================== */
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d', { alpha: false });
-  let DPR = Math.min(window.devicePixelRatio || 1, 2);
-  let W = 0, H = 0, CX = 0, CY = 0;
+  let DPR = Math.min(window.devicePixelRatio || 1, 2); // 過剰負荷回避のため上限2
+  let W = 0, H = 0, CX = 0, CY = 0;                    // 画面幅/高さ、中心座標
   function resize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2);
     W = canvas.clientWidth;
@@ -289,50 +314,54 @@
   resize();
 
   /* =====================================================
-     ゲーム状態
+     ゲーム状態（進行/難易度/スコア）
+     - lastTime: rAFから受け取る時刻msを秒差分に変換する基準
      ===================================================== */
   const state = {
-    running: true,
-    paused: false,   // メニュー表示中の一時停止フラグ
-    over: false,
-    score: 0,
+    running: true,      // 予約フラグ（現状は未使用）
+    paused: false,      // メニュー表示中はtrue（時間停止）
+    over: false,        // ゲームオーバー中フラグ
+    score: 0,           // 撃破数（＝スコア）
     killsForSpeedUp: config.killsForSpeedUp,
     baseEnemySpeed: config.baseEnemySpeed,
     speedStep: config.speedStep,
-    lastTime: 0,
+    lastTime: 0,        // 直前フレームのタイムスタンプ
   };
 
-  // 射撃レート
-  const FIRE_RATE = config.fireRate;            // 発/秒
-  const FIRE_INTERVAL = 1 / FIRE_RATE;         // 間隔(秒)
-  let spawnInterval = config.spawnInterval;    // 敵出現間隔(秒)
+  // 射撃とスポーンのテンポ（秒単位）
+  const FIRE_RATE = config.fireRate;            // 連射回数（発/秒）
+  const FIRE_INTERVAL = 1 / FIRE_RATE;         // 1発ごとの間隔（秒）
+  let spawnInterval = config.spawnInterval;    // 敵スポーン間隔（平均値）
 
   /* =====================================================
-     マシン定義（操作方式）
-     - currentMachine: 1 or 2
-     - マシン1: マウス/タップ照準、押しっぱなしで連射
-     - マシン2: 左右キーで向き回転、常時自動連射
+     マシン定義（操作方式のモード）
+     - currentMachine: 1=ポインタ照準, 2=左右回転+自動連射, 3=自動回転+自動連射（停止可）
+     - UIのヒント文はapplyMachineUI()で同期
      ===================================================== */
-  let currentMachine = 1; // デフォルトはマシン1
+  let currentMachine = 1; // 初期はマシン1（従来操作）
   const helpTextEl = document.getElementById('helpText');
   function applyMachineUI(){
-    // ラジオ表示更新
+    // ラジオ表示のON/OFF
     radio1.classList.toggle('active', currentMachine === 1);
     radio2.classList.toggle('active', currentMachine === 2);
-    // ヒント文更新
+    if (radio3) radio3.classList.toggle('active', enableMachine3 && currentMachine === 3);
+    // 画面左下のヒント文言
     if (currentMachine === 1){
       helpTextEl.innerHTML = 'マウスで狙い <span class="kbd">Click</span> / 長押し、スマホはタップで射撃';
-    } else {
+    } else if (currentMachine === 2){
       helpTextEl.textContent = '左右キーで向きを回転、弾は常時自動連射';
+    } else if (enableMachine3 && currentMachine === 3){
+      helpTextEl.textContent = '自動回転・自動連射。Space/Enterで一時停止、離すと溜め1発';
     }
   }
 
   /* =====================================================
      プレイヤー／入力
+     - プレイヤーは常に画面中心（CX,CY）。半径rは当たり判定用
      ===================================================== */
   const player = { x: () => CX, y: () => CY, r: 14, pulse: 0 };
 
-  // ポインタ（マシン1で使用）
+  /* マシン1用：ポインタ（angle()は中心→ポインタの向き[rad]） */
   const pointer = { x: CX, y: CY, down: false, visible: true, angle(){ return Math.atan2(this.y - CY, this.x - CX); } };
   canvas.addEventListener('pointermove', (e) => {
     const rect = canvas.getBoundingClientRect();
@@ -340,31 +369,32 @@
     pointer.y = e.clientY - rect.top;
   }, { passive: true });
 
-  // マシン2用：向きの角度（ラジアン）と左右入力状態
-  let m2Angle = 0; // 右 = 0 ラジアンから開始
+  /* マシン2用：左右キーで加減算する角度（右向きを0radとする） */
+  let m2Angle = 0;
   let keyLeft = false, keyRight = false;
-  const turnSpeed = (config.machine2TurnSpeedDegPerSec || 360) * Math.PI / 180; // rad/s
+  const turnSpeed = (config.machine2TurnSpeedDegPerSec || 360) * Math.PI / 180; // deg/s → rad/s
 
-  // 入力（共通）
-  let isHolding = false;      // 射撃ボタン押下状態（マシン1）
-  let fireCooldown = 0;       // 発射間隔管理
+  /* 入力（共通） */
+  let isHolding = false;      // マシン1の射撃ボタン押下状態
+  let fireCooldown = 0;       // 次弾までの残り秒数（<=0で発射）
 
   canvas.addEventListener('pointerdown', (e) => {
-    if (state.paused) return; // メニュー中は無効
+    if (state.paused) return; // メニュー中は入力無効
     e.preventDefault(); ensureAudio();
-    if (currentMachine === 1){ isHolding = true; pointer.down = true; shoot(); }
+    if (currentMachine === 1){ isHolding = true; pointer.down = true; shoot(); } // 即1発
   }, { passive: false });
   addEventListener('pointerup', () => { if (currentMachine === 1){ isHolding = false; pointer.down = false; } }, { passive: true });
-  addEventListener('blur', () => { isHolding = false; pointer.down = false; keyLeft=false; keyRight=false; });
+  addEventListener('blur', () => { isHolding = false; pointer.down = false; keyLeft=false; keyRight=false; m3Stopped=false; });
 
   addEventListener('keydown', (e) => {
-    if (e.repeat) return;
-    if (e.code === 'Escape') { toggleMenu(); return; }
-    if (state.paused) return; // メニュー中は操作無効
+    if (e.repeat) return;        // 長押しの連続発火は無視
+    if (e.code === 'Escape') { toggleMenu(); return; } // Escでメニュー切替
+    if (state.paused) return;    // メニュー中は操作無効
     if (e.code === 'Space') {
-      // マシン1のみ、スペースで押しっぱなし射撃（従来動作）
+      // マシン1のみ、スペースで押しっぱなし射撃
       if (currentMachine === 1){ e.preventDefault(); ensureAudio(); isHolding = true; }
     } else if (currentMachine === 2) {
+      // マシン2：左右回転
       if (e.code === 'ArrowLeft')  keyLeft  = true;
       if (e.code === 'ArrowRight') keyRight = true;
     }
@@ -376,7 +406,10 @@
   });
 
   /* =====================================================
-     エンティティ配列
+     エンティティ（ゲーム内オブジェクト）
+     - bullets: 弾
+     - enemies: 敵
+     - particles: 演出用パーティクル（当たり判定なし）
      ===================================================== */
   const bullets = [];
   const enemies = [];
@@ -384,15 +417,16 @@
 
   /* =====================================================
      音（WebAudio｜SFX + BGM）
-     - SFX: ショット/爆発はマスタゲイン(sfxGain)経由
-     - メニュー中: SFXはゲイン0でミュート、BGMは鳴らし続ける
+     - ensureAudio(): 初回操作時にAudioContextを開始
+     - SFX（効果音）はsfxGainに接続。BGMはbgmGainに接続
+     - メニュー中はSFXをミュート、BGMは流し続ける
      ===================================================== */
   let audioCtx = null, sfxGain = null, bgmGain = null, bgmOscs = [];
   function ensureAudio(){
     if (!audioCtx) {
       const AC = window.AudioContext || window.webkitAudioContext;
       audioCtx = new AC();
-      // マスターゲイン
+      // マスターゲイン（SFX/BGMを別ゲインに流し込む）
       sfxGain = audioCtx.createGain(); sfxGain.gain.value = 1.0; sfxGain.connect(audioCtx.destination);
       bgmGain = audioCtx.createGain(); bgmGain.gain.value = 0.08; bgmGain.connect(audioCtx.destination);
       startBGM();
@@ -401,7 +435,7 @@
   }
   function startBGM(){
     if (!audioCtx || bgmOscs.length) return;
-    // シンプルな2音のループ的BGM（軽量）
+    // 軽量BGM（2つのオシレータで持続音を鳴らすだけ）
     const o1 = audioCtx.createOscillator(); o1.type = 'sine';  o1.frequency.value = 220;
     const o2 = audioCtx.createOscillator(); o2.type = 'triangle'; o2.frequency.value = 330;
     o1.connect(bgmGain); o2.connect(bgmGain);
@@ -410,7 +444,8 @@
   }
   function setSFXMuted(muted){ if (sfxGain) sfxGain.gain.value = muted ? 0 : 1.0; }
 
-  function env(duration=0.15, gain=0.08){ // 簡易エンベロープ
+  // 効果音用の簡易エンベロープ（立ち上げ→減衰）
+  function env(duration=0.15, gain=0.08){
     if (!audioCtx) return null;
     const g = audioCtx.createGain();
     g.gain.value = 0; g.connect(sfxGain);
@@ -429,6 +464,7 @@
   function playExplosion(){
     if (!audioCtx) return;
     const e = env(0.35, 0.14); if (!e) return; const { g, t } = e;
+    // ノイズバッファを生成→ローパスで“爆発っぽさ”
     const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.35, audioCtx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < data.length; i++) data[i] = (Math.random()*2-1) * (1 - i / data.length);
@@ -439,22 +475,86 @@
   }
 
   /* =====================================================
-     ユーティリティ
+     ユーティリティ（乱数/クランプ）
      ===================================================== */
   const rand = (a,b) => Math.random()*(b-a)+a;
   const clamp = (v,min,max) => Math.max(min, Math.min(max, v));
 
   /* =====================================================
-     照準角度の取得（マシン毎に切り替え）
+     マシン3：状態・入力（Space/Enterで停止し、離すと溜め1発）
+     ===================================================== */
+  let m3Angle = 0;          // マシン3の向き（rad）
+  let m3Stopped = false;    // 停止ボタン（Space/Enter）押下中
+  let m3ChargeSec = 0;      // 停止中に蓄積するチャージ時間（上限3s）
+
+  // マシン3: Space/Enterで停止／離すと再開＋チャージショット
+  addEventListener('keydown', (e) => {
+    if (!enableMachine3) return;
+    if (state.paused || state.over) return;
+    if (currentMachine !== 3) return;
+    if (e.code === 'Space' || e.code === 'Enter'){
+      m3Stopped = true; e.preventDefault();
+    }
+  });
+  addEventListener('keyup', (e) => {
+    if (!enableMachine3) return;
+    if (currentMachine !== 3) return;
+    if (e.code === 'Space' || e.code === 'Enter'){
+      if (m3ChargeSec > 0) fireChargedShotNow();
+      m3Stopped = false;
+      m3ChargeSec = 0;
+    }
+  });
+
+  // チャージショット即時発射（離した瞬間に1発だけ）
+  function fireChargedShotNow(){
+    const a = getAimAngle();
+    const f = Math.min(1, m3ChargeSec / MACHINE3_PARAMS.maxChargeSec);
+    const radiusMul = 1 + (MACHINE3_PARAMS.maxRadiusMul - 1) * f;   // 1→3
+    const speedMul  = 1 - (1 - MACHINE3_PARAMS.minSpeedMul) * f;    // 1→0.5
+    shootCustom(a, radiusMul, speedMul);
+    muzzleFlash(a);
+    // 直後の通常連射の間隔を整える
+    fireCooldown = FIRE_INTERVAL;
+  }
+
+  // 角度と倍率を指定して弾を生成（既存shoot()は変更しない）
+  function shootCustom(angleRad, radiusMul=1, speedMul=1){
+    const speed = config.bulletSpeed * speedMul;
+    const rBase = 3.2 * radiusMul;
+    const x0 = CX + Math.cos(angleRad) * (player.r + 2);
+    const y0 = CY + Math.sin(angleRad) * (player.r + 2);
+    bullets.push({
+      x: x0, y: y0,
+      vx: Math.cos(angleRad) * speed,
+      vy: Math.sin(angleRad) * speed,
+      life: 1.1,
+      r: rBase,
+      hue: rand(160, 220)
+    });
+    playShot();
+  }
+
+  /* =====================================================
+     現在の照準角度（ラジアン）を取得
+     - マシン1: pointer.angle()
+     - マシン2: m2Angle
+     - マシン3: m3Angle
      ===================================================== */
   function getAimAngle(){
-    return (currentMachine === 1) ? pointer.angle() : m2Angle;
+    if (currentMachine === 1) return pointer.angle();
+    if (currentMachine === 2) return m2Angle;
+    if (enableMachine3 && currentMachine === 3) return m3Angle;
+    // フォールバック
+    return m2Angle;
   }
 
   /* =====================================================
      射撃
-     - マシン1: 押している間連射
-     - マシン2: 常時自動連射（入力不要）
+     - shoot(): 現在方向へ弾を1発生成（弾は寿命/lifeでフェード）
+     - マシン1: 押しっぱなしで連射（isHolding）
+     - マシン2: 常時自動連射（autoHold=true）
+     - マシン3: 常時自動連射、Space/Enter押下中は停止
      ===================================================== */
   function shoot(){
     if (state.over) return;
@@ -464,7 +564,8 @@
     bullets.push({ x: CX + Math.cos(a) * r, y: CY + Math.sin(a) * r, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, life: 1.1, r: 3.2, hue: rand(160, 220) });
     playShot();
   }
-  function muzzleFlash(a){ // 見た目の演出（元コードの簡略版）
+  function muzzleFlash(a){
+    // 見た目の“発射感”を出す小パーティクル（ゲーム性には影響しない）
     const count = 10;
     for (let i = 0; i < count; i++){
       const sp = rand(120, 240);
@@ -474,6 +575,8 @@
 
   /* =====================================================
      敵生成（外周から中心へ）
+     - 位置: 画面外周のランダム角度
+     - 速度: スコアに応じて段階的に上昇
      ===================================================== */
   let spawnTimer = 0;
   function spawnEnemy() {
@@ -483,9 +586,11 @@
     const ex = CX + Math.cos(angle) * radius;
     const ey = CY + Math.sin(angle) * radius;
 
+    // 難易度段階（3撃破ごとに+speedStep）
     const level = Math.floor(state.score / state.killsForSpeedUp);
     const speed = state.baseEnemySpeed * (1 + level * state.speedStep);
 
+    // 中心への単位ベクトルに速度を掛ける
     const dx = CX - ex, dy = CY - ey; const len = Math.hypot(dx, dy) || 1;
     const vx = (dx / len) * speed; const vy = (dy / len) * speed;
 
@@ -494,7 +599,7 @@
   }
 
   /* =====================================================
-     スコア／オーバーレイ
+     スコア／オーバーレイ（ゲームオーバー）
      ===================================================== */
   const scoreEl = document.getElementById('score');
   function addScore(n=1){ state.score += n; scoreEl.textContent = state.score; }
@@ -515,8 +620,8 @@
 
   /* =====================================================
      メニュー制御（一時停止）
-     - メニュー表示: state.paused = true
-     - 敵/弾の更新停止、BGM継続、SFXミュート
+     - openMenu(): state.paused=true, SFXミュート, メニュー表示
+     - closeMenu(): state.paused=false, SFX解除, メニュー非表示
      ===================================================== */
   const menuBtn = document.getElementById('menuBtn');
   const menuOverlay = document.getElementById('menuOverlay');
@@ -525,8 +630,10 @@
   const resetBtn = document.getElementById('resetBtn');
   const rowMachine1 = document.getElementById('rowMachine1');
   const rowMachine2 = document.getElementById('rowMachine2');
+  const rowMachine3 = document.getElementById('rowMachine3');
   const radio1 = document.getElementById('radio1');
   const radio2 = document.getElementById('radio2');
+  const radio3 = document.getElementById('radio3');
 
   function openMenu(){ state.paused = true; menuOverlay.classList.remove('hidden'); setSFXMuted(true); }
   function closeMenu(){ menuOverlay.classList.add('hidden'); state.paused = false; setSFXMuted(false); }
@@ -535,17 +642,24 @@
   menuBtn.addEventListener('click', openMenu);
   closeMenuBtn.addEventListener('click', closeMenu);
 
-  // ラジオ風UIのクリックでマシン切り替え
+  // ラジオ風UI（任意の行をクリックで切り替え）
   rowMachine1.addEventListener('click', () => { currentMachine = 1; applyMachineUI(); });
   rowMachine2.addEventListener('click', () => { currentMachine = 2; applyMachineUI(); });
+  // マシン3はフラグON時のみ選択可能
+  if (!enableMachine3 && rowMachine3) rowMachine3.style.display = 'none';
+  if (enableMachine3 && rowMachine3){
+    rowMachine3.addEventListener('click', () => { currentMachine = 3; applyMachineUI(); });
+  }
+  // ボタンでトグル（従来通り1⇄2）
   toggleMachineBtn.addEventListener('click', () => { currentMachine = (currentMachine === 1 ? 2 : 1); applyMachineUI(); });
 
-  applyMachineUI();
+  applyMachineUI(); // 初期表示を反映
 
   /* =====================================================
      メインループ
-     - メニュー中は update をスキップ（時間停止）
-     - マシン2は常時自動連射
+     - requestAnimationFrameで毎フレーム呼ばれる
+     - dt: 前フレームとの差（秒）。スパイク対策で上限0.033s
+     - ポーズ中はupdateをスキップし、描画のみ実施
      ===================================================== */
   function loop(t){
     if (!state.lastTime) state.lastTime = t;
@@ -555,7 +669,7 @@
     if (!state.paused) {
       update(dt);
     } else {
-      // 停止中は実質 dt=0 と同等、描画だけ行う
+      // 停止中は実質 dt=0 と同等、描画だけ行う（BGMは継続）
       dt = 0;
     }
     render(dt);
@@ -565,17 +679,28 @@
   requestAnimationFrame(loop);
 
   /* =====================================================
-     更新処理
+     更新処理（ゲームロジックの核）
+     - 入力→射撃→スポーン→移動→衝突→パーティクル→鼓動
+     - 配列は逆順ループで安全にsplice削除
      ===================================================== */
   function update(dt){
-    // マシン2：左右キーで向きを回転
+    // マシン2：左右キーで向きを回転（角速度はturnSpeed[rad/s]）
     if (currentMachine === 2){
       if (keyLeft)  m2Angle -= turnSpeed * dt; 
       if (keyRight) m2Angle += turnSpeed * dt;
     }
+    // マシン3：自動で時計回り。停止中はチャージを蓄積
+    if (enableMachine3 && currentMachine === 3){
+      if (!m3Stopped){
+        m3Angle += turnSpeed * dt;        // 時計回り（右向きを正）
+      } else {
+        m3ChargeSec = Math.min(MACHINE3_PARAMS.maxChargeSec, m3ChargeSec + dt);
+      }
+    }
 
     // 射撃レート
-    const autoHold = (currentMachine === 2); // マシン2は常時連射
+    // 置換前: const autoHold = (currentMachine === 2);
+    const autoHold = (currentMachine === 2) || (enableMachine3 && currentMachine === 3 && !m3Stopped);
     const holding = (!state.over && (autoHold || isHolding));
     if (holding){
       fireCooldown -= dt;
@@ -603,14 +728,14 @@
       if (b.x < -40 || b.x > W+40 || b.y < -40 || b.y > H+40 || b.life<=0) bullets.splice(i,1);
     }
 
-    // 敵
+    // 敵（プレイヤー衝突）
     for (let i = enemies.length-1; i>=0; i--){
       const e = enemies[i]; e.x += e.vx * dt; e.y += e.vy * dt;
       const dxp = e.x - CX, dyp = e.y - CY; const d2p = dxp*dxp + dyp*dyp; const rr = (e.r + player.r) * (e.r + player.r);
       if (d2p <= rr){ explode(CX, CY, 200); gameOver(); break; }
     }
 
-    // 衝突判定（弾×敵）
+    // 弾×敵の衝突
     for (let i = enemies.length-1; i>=0; i--){
       const e = enemies[i];
       for (let j = bullets.length-1; j>=0; j--){
@@ -628,12 +753,12 @@
       p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.985; p.vy *= 0.985; p.life -= dt * p.fade; if (p.life <= 0) particles.splice(i,1);
     }
 
-    // 中央の鼓動
+    // 中央タレットの鼓動アニメ
     player.pulse += dt * 2.6;
   }
 
   /* =====================================================
-     爆発パーティクル
+     爆発エフェクト（演出専用）
      ===================================================== */
   function explode(x, y, baseHue=0){
     playExplosion();
@@ -646,36 +771,37 @@
 
   /* =====================================================
      描画
+     - 背景の残像→弾/敵のグロー→パーティクル→プレイヤー→照準
      ===================================================== */
   function render(dt){
-    // 背景 ほんのり残像
+    // 背景の半透明塗り（残像表現）
     ctx.fillStyle = 'rgba(5,8,14,0.35)';
     ctx.fillRect(0,0,W,H);
 
-    // ガイドリング
+    // ガイドリング（中心意識を高めるUI）
     ctx.save(); ctx.translate(CX, CY); const ringR = Math.min(W, H) * 0.22; ctx.globalAlpha = 0.14; ctx.strokeStyle = '#9ad7ff'; ctx.lineWidth = 1.2; ctx.setLineDash([6, 8]); ctx.beginPath(); ctx.arc(0, 0, ringR, 0, Math.PI*2); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.restore();
 
-    // 弾（グロー）
+    // 弾（ネオングロー＋コア）
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
     for (const b of bullets){ const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, 18); grad.addColorStop(0, `hsla(${b.hue},100%,75%,${clamp(b.life,0,1)})`); grad.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(b.x, b.y, 18, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = `hsla(${b.hue},100%,80%,.95)`; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.fill(); }
     ctx.restore();
 
-    // 敵（ネオングロー）
+    // 敵（外周のグロー＋ボディ）
     ctx.save();
     for (const e of enemies){ const g = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, e.r*2.2); g.addColorStop(0, `hsla(${e.hue}, 90%, 65%, .9)`); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(e.x, e.y, e.r*2.2, 0, Math.PI*2); ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = `hsla(${e.hue}, 100%, 70%, .9)`; ctx.fillStyle = `rgba(10,12,18,.9)`; ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, Math.PI*2); ctx.fill(); ctx.stroke(); }
     ctx.restore();
 
-    // パーティクル
+    // パーティクル（発光粒）
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
     for (const p of particles){ ctx.globalAlpha = clamp(p.life, 0, 1); ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill(); }
     ctx.restore();
 
-    // プレイヤー（中心固定タレット）
+    // プレイヤー（中心のタレット＋照準ライン）
     ctx.save(); const px = CX, py = CY; const pulseR = player.r + Math.sin(player.pulse)*1.2; const gg = ctx.createRadialGradient(px, py, 0, px, py, 38); gg.addColorStop(0, 'rgba(80,200,255,.55)'); gg.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(px, py, 38, 0, Math.PI*2); ctx.fill(); const bodyGrad = ctx.createRadialGradient(px-3, py-3, 0, px, py, pulseR+10); bodyGrad.addColorStop(0, '#e6f6ff'); bodyGrad.addColorStop(1, '#7fd6ff'); ctx.fillStyle = bodyGrad; ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(px, py, pulseR, 0, Math.PI*2); ctx.fill(); ctx.stroke();
     // 照準ライン（マシン毎に向きを変更）
     const a = getAimAngle(); ctx.strokeStyle = 'rgba(130,220,255,.85)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px + Math.cos(a)* (player.r+1), py + Math.sin(a)*(player.r+1)); ctx.lineTo(px + Math.cos(a)* 46, py + Math.sin(a)* 46); ctx.stroke(); ctx.restore();
 
-    // カスタムクロスヘア（マシン1のみ表示）
+    // カスタムクロスヘア（マシン1のみ表示＝ポインタが有効なとき）
     if (currentMachine === 1 && pointer.visible){ ctx.save(); ctx.translate(pointer.x, pointer.y); ctx.globalAlpha = 0.9; ctx.strokeStyle = 'rgba(160,220,255,.9)'; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI*2); ctx.stroke(); ctx.beginPath(); ctx.moveTo(-16, 0); ctx.lineTo(-6, 0); ctx.moveTo(16, 0);  ctx.lineTo(6, 0); ctx.moveTo(0, -16); ctx.lineTo(0, -6); ctx.moveTo(0, 16);  ctx.lineTo(0, 6); ctx.stroke(); ctx.restore(); }
   }
 
